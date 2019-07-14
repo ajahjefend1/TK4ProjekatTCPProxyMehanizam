@@ -21,10 +21,10 @@
 
 // Network topology
 //
-//       n0 ---p2p-- n1 --p2p-- n2
-//        |---------qkd---------|
+//       n0 --- n1 --- n2
+//        |-----tcp-----|
 //
-// - udp flows from n0 to n2
+// 
 
 
 
@@ -134,10 +134,16 @@ Ratio(){
     << "\tRatio (packets):\t" << (float)m_packets_received/(float)m_packets_sent << "\n";
 }
 
+//static void
+//CwndChange (std::string context, uint32_t oldCwnd, uint32_t newCwnd)
+//{
+ // NS_LOG_UNCOND (Simulator::Now ().GetSeconds () << "\t" << newCwnd);
+//}
+
 static void
 CwndChange (uint32_t oldCwnd, uint32_t newCwnd)
 {
- // NS_LOG_UNCOND (Simulator::Now ().GetSeconds () << "\t" << newCwnd);
+  NS_LOG_UNCOND (Simulator::Now ().GetSeconds () << "\t" << newCwnd);
 }
 
 
@@ -151,26 +157,19 @@ int main (int argc, char *argv[])
     //
     NS_LOG_INFO ("Create nodes.");
     NodeContainer n;
-    n.Create (5); 
+    n.Create (3); 
 
     NodeContainer n0n1 = NodeContainer (n.Get(0), n.Get (1));
     NodeContainer n1n2 = NodeContainer (n.Get(1), n.Get (2));
-    NodeContainer n2n3 = NodeContainer (n.Get(2), n.Get (3));
-    NodeContainer n3n4 = NodeContainer (n.Get(3), n.Get (4)); 
-    NodeContainer qkdNodes = NodeContainer (
-        n.Get (0), 
-        n.Get (2),
-        n.Get (4)
-    );
-
+  
     //Underlay network - set routing protocol (if any)
 
     //Enable OLSR
     //OlsrHelper routingProtocol;
-    //DsdvHelper routingProtocol; 
+    AodvHelper routingProtocol; 
 
     InternetStackHelper internet;
-    //internet.SetRoutingHelper (routingProtocol);
+    internet.SetRoutingHelper (routingProtocol);
     internet.Install (n);
 
     // Set Mobility for all nodes
@@ -179,8 +178,6 @@ int main (int argc, char *argv[])
     positionAlloc ->Add(Vector(0, 200, 0)); // node0 
     positionAlloc ->Add(Vector(200, 200, 0)); // node1
     positionAlloc ->Add(Vector(400, 200, 0)); // node2 
-    positionAlloc ->Add(Vector(600, 200, 0)); // node3 
-    positionAlloc ->Add(Vector(800, 200, 0)); // node4 
 
     mobility.SetPositionAllocator(positionAlloc);
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -194,14 +191,12 @@ int main (int argc, char *argv[])
 
     NetDeviceContainer d0d1 = p2p.Install (n0n1); 
     NetDeviceContainer d1d2 = p2p.Install (n1n2);
-    NetDeviceContainer d2d3 = p2p.Install (n2n3);
-    NetDeviceContainer d3d4 = p2p.Install (n3n4);
 
 //////// ERROR MODEL///////////
 
   Ptr<RateErrorModel> em = CreateObject<RateErrorModel> ();
   em->SetAttribute ("ErrorRate", DoubleValue (0.0001));
-  d1d2.Get(1) ->SetAttribute ("ReceiveErrorModel", PointerValue (em));
+  d0d1.Get(1) ->SetAttribute ("ReceiveErrorModel", PointerValue (em));
 
 ///////////////////////////////
 
@@ -217,92 +212,37 @@ int main (int argc, char *argv[])
     ipv4.SetBase ("10.1.2.0", "255.255.255.0");
     Ipv4InterfaceContainer i1i2 = ipv4.Assign (d1d2);
 
-    ipv4.SetBase ("10.1.3.0", "255.255.255.0");
-    Ipv4InterfaceContainer i2i3 = ipv4.Assign (d2d3);
-
-    ipv4.SetBase ("10.1.4.0", "255.255.255.0");
-    Ipv4InterfaceContainer i3i4 = ipv4.Assign (d3d4);
-
     // Create router nodes, initialize routing database and set up the routing
     // tables in the nodes.
     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
  
-    //Overlay network - set routing protocol
-
-    //Enable Overlay Routing
-    AodvqHelper routingOverlayProtocol; 
-   // DsdvqHelper routingOverlayProtocol; 
-
-    //
-    // Explicitly create the channels required by the topology (shown above).
-    //
-    QKDHelper QHelper;  
-
-    //install QKD Managers on the nodes
-    QHelper.SetRoutingHelper (routingOverlayProtocol);
-    QHelper.InstallQKDManager (qkdNodes); 
-        
-    //Create QKDNetDevices and create QKDbuffers
-    Ipv4InterfaceAddress va02_0 (Ipv4Address ("11.0.0.1"), Ipv4Mask ("255.255.255.0"));
-    Ipv4InterfaceAddress va02_2 (Ipv4Address ("11.0.0.2"), Ipv4Mask ("255.255.255.0"));
-
-    Ipv4InterfaceAddress va24_2 (Ipv4Address ("11.0.0.3"), Ipv4Mask ("255.255.255.0"));
-    Ipv4InterfaceAddress va24_4 (Ipv4Address ("11.0.0.4"), Ipv4Mask ("255.255.255.0"));
-    
-    //create QKD connection between nodes 0 and 2
-    NetDeviceContainer qkdNetDevices02 = QHelper.InstallOverlayQKD (
-        d0d1.Get(0), d1d2.Get(1), 
-        va02_0, va02_2,  
-        108576,     //min
-        0,          //thr - will be set automatically
-        1085760,    //max
-        1085760     //current    //20485770
-    );
-    //Create graph to monitor buffer changes
-    QHelper.AddGraph(qkdNodes.Get(0), d1d2.Get (0), "myGraph02"); //srcNode, destinationAddress, BufferTitle
-
-    //create QKD connection between nodes 0 and 2
-    NetDeviceContainer qkdNetDevices24 = QHelper.InstallOverlayQKD (
-        d2d3.Get(0), d3d4.Get(1), 
-        va24_2, va24_4,  
-        108576,     //min
-        0,          //thr - will be set automatically
-        1085760,    //max
-        1085760     //current    //88576
-    );
-    //Create graph to monitor buffer changes
-    QHelper.AddGraph(qkdNodes.Get(1), d3d4.Get (0), "myGraph24"); //srcNode, destinationAddress, BufferTitle
  
-    NS_LOG_INFO ("Create Applications."); 
-
-   
-  
+  ///////////////////////////////////////
+  // NS_LOG_INFO ("Create Applications.");
 
     /* Create user's traffic between v0 and v1 */
     /* Create sink app */
-    uint16_t sinkPort = 8080;
-    QKDSinkAppHelper packetSinkHelper ("ns3::VirtualUdpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), sinkPort)); 
-    ApplicationContainer sinkApps = packetSinkHelper.Install (qkdNodes.Get (2));
-    sinkApps.Start (Seconds (25.));
+   uint16_t sinkPort = 8080;
+    QKDSinkAppHelper packetSinkHelper ("ns3::TcpSocketFactory", InetSocketAddress (Ipv4Address::GetAny (), sinkPort)); 
+    ApplicationContainer sinkApps = packetSinkHelper.Install (n.Get (2));
+   sinkApps.Start (Seconds (25.));
     sinkApps.Stop (Seconds (170.));
 
-
-    
     /* Create source app  */
-    Address sinkAddress (InetSocketAddress (va24_4.GetLocal (), sinkPort));
-    Address sourceAddress (InetSocketAddress (va02_0.GetLocal (), sinkPort));
-    Ptr<Socket> overlaySocket = Socket::CreateSocket (qkdNodes.Get (0), VirtualUdpSocketFactory::GetTypeId ());  
+    Address sinkAddress (InetSocketAddress (i1i2.GetAddress(1,0), sinkPort));
+    Address sourceAddress (InetSocketAddress (i0i1.GetAddress(0,0), sinkPort));
+   Ptr<Socket> overlaySocket = Socket::CreateSocket (n.Get (0),TcpSocketFactory::GetTypeId ());  
  
-    Ptr<QKDSend> app = CreateObject<QKDSend> ();
+   Ptr<QKDSend> app = CreateObject<QKDSend> ();
     app->Setup (overlaySocket, sourceAddress, sinkAddress, 200, 0, DataRate ("5kbps"));
-    qkdNodes.Get (0)->AddApplication (app);
+    n.Get (0)->AddApplication (app);
     app->SetStartTime (Seconds (25.));
     app->SetStopTime (Seconds (170.)); 
-
+ 
   ////////// PROZOR ZAGUSENJA////////
-  Config::ConnectWithoutContext("/NodeList/0/$ns3::TcpL4Protocol/SocketList/*/CongestionWindow",MakeCallback(&CwndChange));
+  //Config::Connect("/NodeList/*/$ns3::TcpL4Protocol/SocketList/*/CongestionWindow",MakeCallback(&CwndChange));
   //////////////////////////////////////////////////
-
+Config::ConnectWithoutContext("/NodeList/0/$ns3::TcpL4Protocol/SocketList/*/CongestionWindow",MakeCallback(&CwndChange));
 
     //////////////////////////////////////
     ////         STATISTICS
@@ -310,12 +250,12 @@ int main (int argc, char *argv[])
 
     //if we need we can create pcap files
     p2p.EnablePcapAll ("QKD_vnet_test"); 
-    QHelper.EnablePcapAll ("QKD_overlay_vnet_test");
+   
 
 ///ispisivanje primljenih i poslanih paketa
 
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDSend/Tx", MakeCallback(&SentPacket));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDSink/Rx", MakeCallback(&ReceivedPacket));
+  //Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDSend/Tx", MakeCallback(&SentPacket));
+  // Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDSink/Rx", MakeCallback(&ReceivedPacket));
 
  
     Simulator::Stop ( Seconds (100) );
@@ -324,6 +264,5 @@ int main (int argc, char *argv[])
     Ratio( );
 
     //Finally print the graphs
-    QHelper.PrintGraphs();
     Simulator::Destroy ();
 }
